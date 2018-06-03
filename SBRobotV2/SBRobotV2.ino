@@ -1,12 +1,12 @@
 
 //  SBRobot V2
-//  - this version: 1.0
+//  - this version: 1.1
 //  - this code by: Grumpy Old Tech - Neville Kripp (12th May 2018)
 //
 //
 // Special thanks to Jeff Rowsberg for his work on the I2Cdev and MPU library
 //
-// Feel fee to use and abuse my code as you wish taking into account the that my changes are also 
+// Feel free to use and abuse my code as you wish taking into account that my code is also 
 // subject to the MIT license below.
 
 
@@ -44,6 +44,7 @@
 #include <I2Cdev.h>
 #include <MPU6050_6Axis_MotionApps20.h>
 #include "PID.h"
+#include "Settings.h"
 
 // Digital Pins
 #define BATTERY_INDICATOR_PIN   8
@@ -62,15 +63,25 @@
 #define BALANCING               2
 #define BATTERY_LOW             3
 #define MPU_ERROR               4
+#define TUNE_STARTING           5
+#define TUNE_BALANCING          6
+
 int currentState;
 
-// PID Paramaters
-#define pidP                    15
-#define pidI                    1.5
-#define pidD                    2
-#define pidDB                   5
-#define pidOPMin                -400
-#define pidOPMax                400
+// Settings
+ParametersType defaults = {   // Default settings
+  15.0,                       // pidP
+  1.5,                        // pidI
+  2.0,                        // pidD
+  5.0,                        // pidDB
+  -400,                       // pidOPMin
+  400,                        // pidOPMax
+  30,                         // turnSpeed
+  150,                        // maxSpeed
+  SETTING_VER
+};
+Settings        settings(defaults);
+String          command;
 
 // MPU
 MPU6050         mpu;
@@ -94,8 +105,6 @@ unsigned long   loopTime = 8000;
 
 // Control
 PID             pid;
-float           turnSpeed;
-float           maxSpeed;
 float           angle;
 float           outputLeft;
 float           outputRight;
@@ -126,6 +135,7 @@ void setup() {
   //Serial.println("AT+NAMERobot");
   //delay(2000);
 
+  command = "";
   
   // Setup Digital Pins
   pinMode(BATTERY_INDICATOR_PIN, OUTPUT);                     // Setup Digital Pins
@@ -135,8 +145,8 @@ void setup() {
   pinMode(RIGHT_PULSE_PIN, OUTPUT);
   pinMode(RIGHT_DIRECTION_PIN, OUTPUT);
 
- digitalWrite(BATTERY_INDICATOR_PIN, HIGH);
- digitalWrite(READY_INDICATOR_PIN, HIGH);
+  digitalWrite(BATTERY_INDICATOR_PIN, HIGH);
+  digitalWrite(READY_INDICATOR_PIN, HIGH);
  
   TCCR2A = 0;                                                 // Setup Timed Interrupt for motor control - execute ISR(TIMER2_COMPA_vect) routine every 20 uS
   TCCR2B = 0;
@@ -146,12 +156,8 @@ void setup() {
   TCCR2A |= (1 << WGM21);
 
   pid.reset();                                                // Setup Control Parameters
-  pid.setTuningParameters(pidP, pidI, pidD, false); 
-  pid.setDeadband(pidDB);
-  pid.setOutputLimited(pidOPMin, pidOPMax);
-  turnSpeed = 30;
-  maxSpeed = 150;
-  
+  setPIDParameters();
+
   Serial.println(F("Initializing I2C devices..."));           // Initialise the MPU
   mpu.initialize();
   Serial.println(F("Testing device connection..."));
@@ -206,6 +212,9 @@ void loop() {
 
     case MPU_ERROR:
     {
+      receivedCounter = 0;
+      receivedByte = 0x00;
+
       throttleLeftMotor = 0;                                  // Make sure motor controls are at zero
       throttleRightMotor = 0;
 
@@ -219,6 +228,9 @@ void loop() {
     }
     case BATTERY_LOW:
     {
+      receivedCounter = 0;
+      receivedByte = 0x00;
+
       throttleLeftMotor = 0;                                  // Make sure motor controls are at zero
       throttleRightMotor = 0;
 
@@ -230,6 +242,9 @@ void loop() {
     }
     case MPU_INIT:
     {
+      receivedCounter = 0;
+      receivedByte = 0x00;
+
       throttleLeftMotor = 0;                                  // Make sure motor controls are at zero
       throttleRightMotor = 0;
 
@@ -245,10 +260,27 @@ void loop() {
   
       loopTimer = micros() + loopTime;                            // Setup for starting
       currentState = STARTING;
+      Serial.println("Ready");
       break;
     }
     case STARTING:
     {
+      if (receivedCounter == 25) {                            // Check if received a new command from serial
+
+        if (receivedByte == 'S') {                            // If S then change to setup mode and send paramaters  
+
+          currentState = TUNE_STARTING;
+          Serial.println("Settings Mode");
+          settings.sendParamatersOnSerial();
+        }
+        else {                                                // Else send error message
+          
+          Serial.print("Not accepting commands yet");
+        }
+      }
+      receivedCounter = 0;
+      receivedByte = 0x00;
+      
       throttleLeftMotor = 0;                                  // Make sure motor controls are at zero
       throttleRightMotor = 0;
       
@@ -265,6 +297,30 @@ void loop() {
     }
     case BALANCING:
     {
+      if (receivedCounter == 25) {                            // Check if received a new command from serial
+
+        if (receivedByte == 'S') {                            // If S then change to setup mode and send paramaters  
+
+          currentState = TUNE_BALANCING;
+          Serial.println("Settings Mode");
+          settings.sendParamatersOnSerial();
+          receivedCounter = 0;
+        }
+        else if (receivedByte > 16) {                         // Else check if a valid command, error if invalid
+
+          Serial.print("Invalid command");
+          receivedCounter = 0;
+        }
+      }
+      if (receivedCounter > 0) {                              // decrement the received counter is not already 0
+
+        receivedCounter--;
+      }
+      else {
+
+        receivedByte = 0x00;                                  // reset the byte to 00 if counter at 0
+      }
+      
       checkMPU();                                             // Get the Angle
       angle = ypr[1] * 180/M_PI;
 
@@ -272,6 +328,106 @@ void loop() {
 
         pid.reset();
         currentState = STARTING;
+      }
+      else {
+
+        calculateDriveSignals();                              // Calculate drive signals
+      }
+      break;
+    }
+    case TUNE_STARTING:
+    {
+      if (receivedCounter == 25) {                            // Check if received a new command from serial
+
+        if (receivedByte == 'R') {                            // If R then change to run mode
+
+          currentState = STARTING;
+          Serial.println("Run Mode");
+        }
+        else if (receivedByte == 'W') {                       // If W then change to save parameters
+
+          settings.save();
+          Serial.println("Saved OK");
+        }
+        else if (receivedByte < 13) {                         // Else check if a valid command, error if invalid
+
+          Serial.print("Not responding to direction commands");
+        }
+        else {
+
+            if (receivedByte == 13) {                         // if command complete process it
+
+              settings.processCommandString(command);
+              setPIDParameters();
+              settings.sendParamatersOnSerial();
+              command = "";
+            }
+            else {
+
+              command.concat((char)receivedByte);                   // build up command
+            }
+        }
+      }
+      receivedCounter = 0;
+      receivedByte = 0x00;
+      
+      throttleLeftMotor = 0;                                  // Make sure motor controls are at zero
+      throttleRightMotor = 0;
+      
+      digitalWrite(READY_INDICATOR_PIN, LOW);                 // Leave indicator On to indicate ready
+      
+      checkMPU();                                             // Get the Angle
+      angle = ypr[1] * 180/M_PI;
+
+      if (between(angle, -0.5, 0.5)) {                        // Change to Balance if upright
+
+        currentState = TUNE_BALANCING;
+      }
+      break;
+    }
+    case TUNE_BALANCING:
+    {
+      if (receivedCounter == 25) {                            // Check if received a new command from serial
+
+        if (receivedByte == 'R') {                            // If R then change to run mode
+
+          currentState = BALANCING;
+          Serial.println("Run Mode");
+        }
+        else if (receivedByte == 'W') {                       // If W then change to save parameters
+
+          settings.save();
+          Serial.println("Saved OK");
+        }
+        else if (receivedByte < 13 ) {                         // Else check if a valid command, error if invalid
+
+          Serial.print("Not responding to direction commands");
+        }
+        else {
+
+            if (receivedByte == 13) {                         // if command complete process it
+  
+              settings.processCommandString(command);
+              setPIDParameters();
+              settings.sendParamatersOnSerial();
+              command = "";
+            }
+            else {
+
+              command.concat((char)receivedByte);                   // build up command
+            }
+        }
+      }
+      receivedCounter = 0;
+      receivedByte = 0x00;
+      
+      checkMPU();                                             // Get the Angle
+      angle = ypr[1] * 180/M_PI;
+
+      if (!between(angle,-30,30)) {                           // Change back to Starting if toppled over
+
+        pid.reset();
+        currentState = TUNE_STARTING;
       }
       else {
 
@@ -348,14 +504,14 @@ void calculateDriveSignals() {
   outputRight = pid.output;
 
   if (receivedByte & 0b00000010) {                            // Turn Left
-    outputLeft += turnSpeed;
-    outputRight -= turnSpeed;
+    outputLeft += settings.parameters->turnSpeed;
+    outputRight -= settings.parameters->turnSpeed;
   }
 
   if (receivedByte & 0b00000001) {                            // Turn Right
     
-    outputLeft -= turnSpeed;
-    outputRight += turnSpeed;
+    outputLeft -= settings.parameters->turnSpeed;
+    outputRight += settings.parameters->turnSpeed;
   }
 
   if (receivedByte & 0b00000100) {                            // Forward
@@ -364,7 +520,7 @@ void calculateDriveSignals() {
       
       pid.setpoint -= 0.05;
     }
-    if (pid.output > -maxSpeed) {
+    if (pid.output > -settings.parameters->maxSpeed) {
       
       pid.setpoint -= 0.005;
     }
@@ -376,7 +532,7 @@ void calculateDriveSignals() {
       
       pid.setpoint += 0.05;
     }
-    if (pid.output < maxSpeed) {
+    if (pid.output < settings.parameters->maxSpeed) {
       
       pid.setpoint += 0.005;
     }
@@ -517,16 +673,15 @@ void checkSerialComms() {
    if (Serial.available()) {
     
     receivedByte = Serial.read();
-    receivedCounter = 0;
+    receivedCounter = 25;
   }
-  if (receivedCounter <= 25) {
-    
-    receivedCounter++;
-  }
-  else {
-    
-    receivedByte = 0x00;
-  }
+}
+
+void setPIDParameters() {
+
+  pid.setTuningParameters(settings.parameters->pidP, settings.parameters->pidI, settings.parameters->pidD, false); 
+  pid.setDeadband(settings.parameters->pidDB);
+  pid.setOutputLimited(settings.parameters->pidOPMin, settings.parameters->pidOPMax);
 }
 
 void checkBatteryVoltage() {
