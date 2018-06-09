@@ -51,6 +51,7 @@ void Settings::sendParamatersOnSerial() {
 
 void Settings::processCommandString(String command) {
 
+  Serial.print("Command: ");
   Serial.println(command);
 
   if (command.startsWith("pidP")) {
@@ -58,60 +59,52 @@ void Settings::processCommandString(String command) {
     String number = command.substring(4);
     parameters->pidP = number.toFloat();
     Serial.println("OK");
-    Serial.println("New parameters");
   }
   else if (command.startsWith("pidI")) {
 
     String number = command.substring(4);
     parameters->pidI = number.toFloat();
     Serial.println("OK");    
-    Serial.println("New parameters");
   }
   else if (command.startsWith("pidD")) {
     
     String number = command.substring(4);
     parameters->pidD = number.toFloat();
     Serial.println("OK");    
-    Serial.println("New parameters");
   }
   else if (command.startsWith("pidDB")) {
     
     String number = command.substring(5);
     parameters->pidDB = number.toFloat();
     Serial.println("OK");    
-    Serial.println("New parameters");
   }
   else if (command.startsWith("pidOPMin")) {
 
     String number = command.substring(8);
     parameters->pidOPMin = number.toFloat();
     Serial.println("OK");    
-    Serial.println("New parameters");
   }
   else if (command.startsWith("pidOPMax")) {
 
     String number = command.substring(8);
     parameters->pidOPMax = number.toFloat();
     Serial.println("OK");    
-    Serial.println("New parameters");
   }
   else if (command.startsWith("turnSpeed")) {
 
     String number = command.substring(9);
     parameters->turnSpeed = number.toFloat();
     Serial.println("OK");        
-    Serial.println("New parameters");
   }
   else if (command.startsWith("maxSpeed")) {
 
     String number = command.substring(8);
     parameters->maxSpeed = number.toFloat();
     Serial.println("OK");           
-    Serial.println("New parameters");
   }
   else {
 
-    Serial.println("Command Invalid");
+    Serial.println("Invalid");
   }
 }
 

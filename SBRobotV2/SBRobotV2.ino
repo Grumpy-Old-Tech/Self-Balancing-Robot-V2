@@ -1,6 +1,6 @@
 
 //  SBRobot V2
-//  - this version: 1.1
+//  - this version: 1.2
 //  - this code by: Grumpy Old Tech - Neville Kripp (12th May 2018)
 //
 //
@@ -359,6 +359,7 @@ void loop() {
 
               settings.processCommandString(command);
               setPIDParameters();
+              Serial.println("New parameters");
               settings.sendParamatersOnSerial();
               command = "";
             }
@@ -409,6 +410,7 @@ void loop() {
   
               settings.processCommandString(command);
               setPIDParameters();
+              Serial.println("New parameters");
               settings.sendParamatersOnSerial();
               command = "";
             }
